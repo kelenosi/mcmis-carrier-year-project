@@ -1,0 +1,653 @@
+---
+title: "Motor Carrier Risk Segmentation"
+format:
+  pdf:
+    toc: false
+    number-sections: true
+    fig-format: png 
+    fig-width: 6
+    fig-height: 4
+    keep-tex: true
+    pdf-engine: xelatex
+    documentclass: acmart
+    classoption: [sigconf, nonacm]
+    include-in_header: header_late.txt
+    longtable: false
+block-headings: false
+csl: acm-sig-proceedings.csl
+latex:
+  auto-install: false
+jupyter: python3
+execute:
+  warning: false    # <— hide warnings in output
+  message: false    # <— hide “print-like” messages (optional)
+  echo: true        # keep code visible; set to false if you want code hidden
+---
+
+```{python}
+#| echo: false
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
+from tabulate import tabulate
+
+# Adjust path as needed; assumes the CSV is in the same directory as this .qmd
+data_path = Path("carrier_year_model.csv")
+df = pd.read_csv(data_path,low_memory=False)
+
+```
+
+**Abstract**
+
+This report presents a data-mining workflow applied to FMCSA crash, exposure, and vehicle datasets for the purpose of generating risk-based insights at the carrier level. Techniques are drawn from Data Mining: Concepts and Techniques(Han, Kamber & Pei) and include: data cleaning and validation; construction of a carrier-year analytical dataset; classification and clustering experiments; K-means segmentation with cluster level summaries; and supporting exploratory visualizations. The results reveal clear relationships between crash frequency, exposure(Vehicle Mileage Traveled (VMT)), vehicle weight distribution, fuel types and operating states. K-means clustering consistently separates high-risk motor carriers based on vehicle composition and crash patterns. These insights can inform insurance rating algorithms, underwriting risk selection models, regulatory research and carrier-level benchmarking.
+
+# Introduction
+
+Motor carriers vary widely in safety performance, operating characteristics, and loss experience. For insurers and regulators, understanding the attributes associated with crash risk is essential for pricing, risk selection, compliance monitoring and portfolio management.
+
+This project addresses the following:
+
+**1. Data Aggregation:**
+
+At what level of granularity should FMCSA crash and exposure data be aggregated to enable classification and clustering consistent with the course textbook Data Mining: Concepts and Techniques? The suitability of the carrier-year as the analytical level is assessed.
+
+**2. Feature Engineering**
+
+Which attributes (VMT, fleet composition, GVWR distributions, fuel type, state mix, crash type) are most correlated with crash outcomes.
+
+**3. Classification and Clustering:**
+
+Which techniques can be applied to profile high-risk carriers. The methods explored were:
+
+-   Decision tree classification
+-   K-means clustering
+-   Correlation analysis
+-   Cluster-level summaries
+
+**4. Applications:**
+
+How can the results be used in practice(insurance pricing, risk selection, benchmarking, regulatory oversight)?
+
+The importance of this project lies in transforming raw operational data into structured, interpretable knowledge that supports risk-based decision making in the insurance and transportation industries.
+
+# Related Work
+
+Studies usually focus the relationship between vehicle attributes(weight,model year) and human factors (fatigue, excessive speed, distracted driving). The Federal Motor Carrier Safety Administration (FMCSA) publishes various crash databases as well as the National Highway Traffic Safety Administration. FMCSA's Large Truck Crash Causation Study and MCMIS datasets have been used in numerous academic analyses a few are included below:
+
+**FMCSA Safety Measurement Research**
+
+**FMCSA Large Truck Crash Causation Study**
+
+-   U.S. Department of Transportation, Federal Motor Carrier Safety Administration. (2006). Report to Congress on the Large Truck Crash Causation Study. FMCSA. <https://www.fmcsa.dot.gov/safety/research-and-analysis/large-truck-crash-causation-study>
+
+**Vehicle Weight & Crash Risk**
+
+-   Blower, D., & Woodrooffe, J. (2012). Heavy Truck Weight and Crash Severity. University of Michigan Transportation Research Institute (UMTRI).
+
+-   Blower, D. (2014). Trends in Truck Crash Rates and Vehicle Characteristics. UMTRI.
+
+**Crash Rate Modeling**
+
+-   Miaou, S.-P., & Lum, H. (1993). Modeling vehicle accidents and highway geometric design relationships. Accident Analysis & Prevention, 25(6), 689--709.
+
+-   Abdel-Aty, M., & Radwan, E. (2000). Modeling traffic accident occurrence using multivariate analysis. Accident Analysis & Prevention, 32(6), 633--642.
+
+**Commercial Auto Insurance / Actuarial Research**
+
+The following papers relate directly to fleet- or carrier-level modeling, loss costs, and segmentation.
+
+**CAS (Casualty Actuarial Society) Research Papers**
+
+-   Blum, M., & Gabrielli, L. (2021). Commercial Automobile Pricing: A Data-Driven Approach. CAS Monograph Series.
+
+-   Frees, E., Derrig, R., & Meyers, G. (2014). Predictive Modeling Applications in Actuarial Science, Volume 1. Cambridge University Press. (Chapter on frequency & severity modeling is directly applicable.)
+
+**Commercial Auto Risk Modeling**
+
+-   Ishmael, E., & Lai, M. (2018). Telematics and Commercial Auto Risk Modeling. CAS Proceedings.
+
+-   Shi, P., & Valdez, E. (2014). A copula approach to modeling multivariate claim counts. Insurance: Mathematics and Economics.
+
+**Commercial Auto Exposure Normalization**
+
+-   ISO / Verisk Analytics. (2018--2024). Commercial Auto State Loss Cost Filings. (Used widely for crash frequency & severity parameterization.)
+
+-   National Council on Compensation Insurance (NCCI). Statistical Bulletin series (for exposure trend methodology parallel to auto).
+
+The proposed project is not attempting any new or innovative methods it attempts to use data mining methods to produce results that are consistent with previous research.
+
+# Datasets
+
+The following FMCSA datasets were used:
+
+\href{https://data.transportation.gov/Trucking-and-Motorcoaches/Crash-File/aayw-vxb3/about_data}{\textbf{MCMIS Crash file}}
+
+The FMCSA Crash File contains 4.86M rows and 59 data elements composed of data received from state
+police crash reports involving drivers and vehicles of motor carriers operating
+in the U.S. Each report contains about 80 data elements pertaining to motor carrier,
+driver, vehicles and circumstances of a crash.
+
+The Crash File may contain multiple records for a crash. Separate reports are entered
+for each commercial motor vehicle involved in a crash. The multiple reports can be
+distinguished by the Crash Report Number field.
+
+
+
+\href{https://data.transportation.gov/Trucking-and-Motorcoaches/Vehicle-Inspections-and-Violations/876r-jsdb/about_data}{\textbf{Vehicle Inspections and Violations}}
+
+The FMCSA report includes inspections involving violations of the FMCSR OR HRM.
+The file contains 13M rows and 12 columns.
+
+
+\href{https://data.transportation.gov/Trucking-and-Motorcoaches/Company-Census-File/az4n-8mr2/about_data}{\textbf{Company Census Information}}
+The Company Census File contains records for active entities registered with FMCSA. Active entities include those entities subject to the FMCSR, HMR, or intrastate non-Hazardous Material (HM) carriers. To identify each entity, FMCSA assigns a unique number to each entity record. This number is referred to as the USDOT number.
+Each Census record contains entity identifying data, business operations data, equipment and driver data, and carrier review data.
+
+
+**Chosen Level of Aggregation: Carrier-Year**
+
+Although the raw crash data is at the crash level, the methods used to analyze
+the data require features that describe entities not isolated events.
+
+After reviewing the data it became apparent that the crash level was inappropriate
+for this exercise for the following reasons:
+-   The crash level was too granular which would turn classification into event
+prediction, not carrier characterization.
+-   The variables are not independent, multiple records belong to a singular
+carrier, multiple vehicles can be associated with the same carrier id.
+-   Exposure values (VMT) are at the carrier-year level.
+
+An example of some of the features created and used:
+
+```{=latex}
+{\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Feature} & \textbf{Description} \\
+\midrule
+carrier\_id & FMCSA DOT number \\
+year & Analysis year \\
+vmt\_annual & Annual exposure \\
+crash\_count & Number of reportable crashes \\
+fatal\_count, injury\_count & Crash severity indicators \\
+pct\_gvwr\_1--8 & Vehicle composition (GVWR buckets) \\
+pct\_fuel\_diesel, pct\_fuel\_gas, etc. & Fuel composition indicators \\
+pct\_state\_top5 & Geographic operation mix \\
+crash\_rate\_per\_vmt & Normalized safety metric \\
+carrier\_size\_bucket & Engineered size indicator \\
+\bottomrule
+\end{tabular}
+}
+
+```
+
+# Techniques Applied
+
+## Data Cleaning and Preprocessing
+
+The three data sources were initially in the form of CSV files downloaded from
+the respective websites. The data cleaning and initial transformations were done
+in PostgreSQL using SQL.There were several issues with working with CSVs to turn 
+them into tables within a database schema. The main issues were:
+
+**Handling mixed data types within a field**
+
+This was typically handled via Regular expressions to avoid invalid input 
+syntax: "" when loading the data into the database. Regular expression are useful
+in handling blank, "NA", and invalid fields. Examples are shown below:
+
+```sql
+
+Example: regular expression used to calculate vehicle age:
+
+SET vehicle_age = CASE
+    WHEN crash_year IS NOT NULL
+         AND NULLIF(REGEXP_REPLACE(rep_model_year, 
+         '[^0-9]+', '', 'g'), '') IS NOT NULL
+    THEN crash_year - 
+    CAST(NULLIF(REGEXP_REPLACE(rep_model_year,
+    '[^0-9]+', '', 'g'), '') AS NUMERIC)
+    ELSE NULL
+END;
+
+```
+**Null and empty string normalization**
+
+For the sake of consistency all blank, "NA", and invalid fields where set to 
+NULL. Derived features and numeric fields where validated with logic such as:
+
+```sql
+CASE WHEN field ~ '[^0-9]+' THEN field::numeric END
+```
+
+The above expression both make use of the regular expression `^[0-9]+$`, which is
+used to check whether the value stored in a field:
+
+-   starts with a digit
+-   ends with a digit
+-   has every character in between also a digit(no spaces, letters, decimals,
+punctuation, signs, etc.)
+-   if the value passes this text, treat it as a numeric value
+-   if it does not pass the test, ignore it return Null.
+
+This pattern is commonly used when handling columns with mixed data types.
+
+**Crash rate issue**
+
+The issue that occurs when setting missing or inconsistent datatypes to
+NULL, is that any subsequent mathematical operation with a NULL value
+will return NULL. For example the expression below returned NULL even though
+the variable vmt_annual was a non-zero value.
+
+```sql
+
+Returns NULL:
+
+CASE WHEN vmt_annual > 0 
+     THEN crash_count / vmt_annual 
+END
+
+Use the COALESCE function to handle NULL values 
+
+CASE WHEN vmt_annual > 0 
+     THEN COALESCE(crash_count,0) / vmt_annual 
+     END
+
+```
+The COALESCE function will return the value after the comma if the value
+left of the comma is NULL, MISSING or Blank.
+
+
+## Further Cleaning and Helper List
+
+Even though the dataset has already undergone substantial cleaning, including
+normalization of missing values and derivation of rates. Additional cleaning
+was needed to prepare for clustering and visualization, following standard data
+preprocessing principles.
+
+```{python}
+#| echo: false
+
+df_clean = df.copy()
+```
+
+**Replace negative exposures with NaN:**
+
+Process  used to replace negative values with Nan.
+```{python}
+for col in ["vmt_annual", "power_units"]:
+  
+  if col in df_clean.columns:
+    df_clean.loc[df_clean[col] < 0, col] = np.nan
+    df_clean = df_clean.dropna(
+      subset=["vmt_annual", "crash_rate_per_vmt"], 
+      how="any"
+      )
+
+out_clean = df_clean["crash_rate_per_vmt"].describe()
+```
+
+
+```{python}
+#| echo: false
+#| results: asis
+
+print(
+    out_clean
+          .to_markdown(index=True)
+)
+```
+
+
+
+To facilitate the correlation and clustering a helper list of numeric features
+was developed.
+```{python}
+#| echo: false
+
+cluster_features = [
+"crash_rate_per_vmt",
+"insp_oos_rate",
+"violations_per_insp",
+"avg_severity_per_crash",
+"avg_rep_gwr_top",
+"pct_rep_gwr_lt6k",
+"pct_rep_gwr_6k_10k",
+"pct_rep_gwr_10k_14k",
+"pct_rep_gwr_14k_26k",
+"pct_rep_gwr_26k_33k",
+"pct_rep_gwr_gt33k",
+"pct_fuel_diesel",
+"pct_fuel_gasoline",
+"pct_fuel_electric",
+"pct_fuel_natgas",
+"pct_fuel_hybrid",
+"pct_age_0_4",
+"pct_age_5_9",
+"pct_age_10_14",
+"pct_age_15_19",
+"pct_age_20_plus",
+]
+
+cluster_features = [c for c in cluster_features if c in df_clean.columns]
+
+#len(cluster_features), cluster_features
+
+```
+## Exploratory Data Analysis and Visualization
+
+**Crash Rate per VMT vs Exposure**
+
+```{python}
+#| echo: false
+#| fig-cap: "Crash Rate per VMT vs Exposure (log-log)"
+#| fig-width: 3.3   # GOOD size for single column ACM
+#| fig-height: 2.2
+
+fig, ax = plt.subplots(figsize=(6,4))
+ax.scatter(
+    np.log10(df_clean["vmt_annual"]), 
+    np.log10(df_clean["crash_rate_per_vmt"].replace(0,np.nan)),
+    alpha=0.1, s=5
+)
+ax.set_xlabel("log10(VMT Annual)")
+ax.set_ylabel("log10(Crash Rate per VMT)")
+ax.set_title("Crash Rate vs Exposure (log-log)")
+plt.tight_layout()
+plt.show()
+
+
+
+```
+This plot reveals the slope, which is the structural safety effect:
+Big fleets are safer per mile Variance stabilizes with exposure
+Crash uncertainty collapses as fleets grow This is one of the central
+empirical results in FMCSA research
+
+
+**Crash Rate by Weight-Class Mix**
+
+```{python}
+
+#| echo: false
+#| results: asis
+
+
+weight_cols = [c for c in df_clean.columns if c.startswith("pct_rep_gwr_")]
+summary = (
+df_clean[["crash_rate_per_vmt"] + weight_cols]
+.dropna()
+.mean()
+.to_frame(name="mean_value")
+)
+
+print(
+    summary
+          .to_markdown(index=True)
+)
+
+```
+
+
+The chart shows how crash rate varies with fleet weight composition, using
+avg_rep_gwr_top and selected GVWR proportion variables, broadly consistent with
+the emphasis on vehicle weight and crash severity.S
+
+## Correlation Analysis
+
+Pairwise correlations computed to:
+-   Only return correlations above |0.30|
+-   Output long-format pairs (colA,colB, r)
+
+Results showed:
+-   If a fleet is heavy, it is almost always diesel-powered
+-   Heavy fleets have very low gasoline composition
+-   Fleets with many violations per inspection tend to fail inspections and
+get placed out of service.
+
+A graph of the results is shown in section 7.
+
+## Clustering Methodology
+
+Have decided to explore k-means clustering (DMCT Chapter 10; MacQueen, 1967; Jain, 2010) to 
+segment carriers into groups with similar risk profiles. Because the dataset
+is large, a sample was used as a subset for fitting and visualization, while still using a 
+substantial number of records.
+
+**Sample for clustering to keep computation manageable**
+```{python}
+#| echo: false
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+
+sample_n = min(200000, len(df_clean))
+df_sample = df_clean.sample(n=sample_n, random_state=42)
+
+X = df_sample[cluster_features].fillna(0).values
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+k = 3 # can be adjusted after testing
+kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+labels = kmeans.fit_predict(X_scaled)
+
+df_sample["cluster"] = labels
+df_sample["cluster"].value_counts().sort_index()
+
+```
+
+**Cluster-Level Summaries**
+
+Summarize each cluster in terms of crash rate and key composition variables
+```{python}
+
+#| echo: false
+
+summary_cols = [
+"crash_rate_per_vmt",
+"insp_oos_rate",
+"violations_per_insp",
+"avg_rep_gwr_top",
+"pct_rep_gwr_lt6k",
+"pct_rep_gwr_6k_10k",
+"pct_rep_gwr_10k_14k",
+"pct_rep_gwr_14k_26k",
+"pct_rep_gwr_26k_33k",
+"pct_rep_gwr_gt33k",
+"pct_fuel_diesel",
+"pct_age_0_4",
+"pct_age_20_plus",
+]
+
+summary_cols = [c for c in summary_cols if c in df_sample.columns]
+
+cluster_summary = (
+df_sample.groupby("cluster")[summary_cols]
+.mean()
+.round(4)
+)
+
+
+```
+
+
+Cluster Scoring Logic for Underwriting Dashboards
+
+To operationalize the clustering results, it is possible to use the fitted scaler 
+and kmeans objects to assign new carrier-year records to clusters. Each cluster 
+can then be mapped to a descriptive risk tier (e.g., low, medium, high), in 
+line with how insurers often build tiered risk segments for rating and underwriting.
+
+# Key Results
+
+The top differentiatiors are:
+
+```{=latex}
+{\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Feature} & \textbf{Meaning} \\
+\midrule
+avg\_rep\_gwr\_top & verage vehicle weight \\
+pct\_rep\_gwr\_gt33k & proportion of heavy trucks \\
+pct\_fuel\_diesel & proportion of diesel units \\
+insp\_oos\_rate & out-of-service rate on inspections \\
+violations\_per\_insp & average violations per inspection \\
+pct\_age\_0\_4,pct\_age\_20\_plus& mix of brand new vs old equipment\\
+\bottomrule
+\end{tabular}
+}
+```
+
+
+K-means segmentation successfully distinguishes operational risk environments 
+among carriers. The highest-risk segment consists of small light fleets with 
+poor compliance outcomes. The lowest-risk segment consists of large heavy 
+carriers with mature operations and more stable safety performance. A mid-tier 
+segment captures blended fleets with moderate characteristics. Regulatory inspection 
+behavior, fleet composition, and equipment maturity are the most discriminative
+features, supporting their use as early safety indicators in commercial auto 
+underwriting and performance monitoring.
+
+# Applications
+
+**Underwriting & Risk Selection**
+
+Pre-bind risk scoring based on cluster memberships
+Benchmarks for expected crash rates
+Identification of carriers whose fleet characteristics deviate from peers
+
+
+**Pricing & Actuarial Modeling**
+
+Frequency/Severity model inputs (e.g., GVWR mixes)
+Portfolio segmentation for rate adequacy review
+Loss cost relativity development
+
+
+**Regulatory Compliance & Research**
+
+Evidence-based differentiation of carrier groups
+Ability to explain risk selection logic using interpretable clusters
+Operational Insights
+
+
+\newpage
+
+# Visualization of Results
+
+
+In the table below:
+
+-   Each row is a feature.
+-   Each column is a cluster (Cluster 0, Cluster 1, Cluster 2).
+-   Values = average feature level within the cluster.
+
+Interpret the results by:
+
+-   spotting features that strongly differentiate clusters
+-   ignoring features that are nearly zero everywhere
+-   reading fleet composition + fuel type + age along with safety metrics
+
+
+```{python}
+#| echo: false
+#| results: asis
+#| tbl-cap: "Top Differentiating Features (Transposed)"
+
+print(
+  cluster_summary.T
+          .to_markdown(index=True)
+)
+```
+
+**Example of Interpretation of Cluster 0**
+
+Cluster 0 — Large, Heavy, Operationally Mature Fleets
+
+Evidence:
+
+avg_rep_gwr_top = 32,714 lbs, heavy commercial fleet  
+pct_rep_gwr_gt33k = 0.9284, 93% heavy trucks  
+pct_fuel_diesel = 0.9778, diesel dominant (true trucking fleet)  
+pct_age_0_4 = 0.5581,very new equipment  
+violations_per_insp = 1.3243, moderate compliance issues  
+insp_oos_rate = 0.2367, moderate OOS  
+
+```{=latex}
+{\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Cluster} & \textbf{Safety/Compliance} & \textbf{Fleet Character}\\
+\midrule
+0 & Moderate violations,low volatility & professional trucking fleets) \\
+1 & Worst safety & small, light\_duty fleets with weak discipline \\
+2 & Moderate risk& Mixed fleets; mid\-exposure segment \\
+\bottomrule
+\end{tabular}
+}
+```
+
+**Correlations**
+
+
+```{python}
+#| echo: false
+
+# compute full correlation matrix
+corr_df = df_clean[cluster_features].dropna().corr()
+
+# convert to long format
+corr_long = (
+    corr_df.stack()                       # turn into (var1, var2) rows
+           .reset_index()
+)
+corr_long.columns = ["feature_1", "feature_2", "correlation"]
+
+# drop self-correlations (always = 1)
+corr_long = corr_long[corr_long["feature_1"] != corr_long["feature_2"]]
+
+# get absolute correlation strength for ranking
+corr_long["abs_corr"] = corr_long["correlation"].abs()
+
+# keep only the top N highest correlated pairs
+top_corr = (
+    corr_long.sort_values("abs_corr", ascending=False)
+              .head(15)
+)
+
+corr_long_unique = (
+    corr_long[corr_long["feature_1"] < corr_long["feature_2"]]
+)
+
+top_corr = (
+    corr_long_unique.sort_values("abs_corr", ascending=False)
+                    .head(15)
+)
+
+```
+
+
+```{python}
+#| echo: false
+#| results: asis
+
+print(
+    top_corr[["feature_1", "feature_2", "correlation"]]
+          .to_markdown(index=False)
+)
+```
+\newpage
+
+# Conclusion
+
+This project successfully implemented a  data-mining workflow consistent 
+with class text book Data Mining: Concepts and Techniques. By constructing a
+comprehensive carrier-year model table, applying DMCT-approved preprocessing, 
+and running k-means clustering meaningful risk segments and interpretable results
+were generated.
+
